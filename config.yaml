@@ -453,7 +453,7 @@ Tratamiento_Variables:
     - plaquetas
     - vol_plaquetario
   Eliminar:
-    - edad
+    - f_inclusion
     - trabajo_otro
     - tipo_ejercicio
     - otra_dieta
@@ -598,7 +598,6 @@ Tratamiento_Variables:
     - PAD_media
     - xb
   Especial:
-    - f_inclusion
     - f_nac
     - med1
     - med2
