@@ -86,7 +86,7 @@ Tratamiento_Variables:
     - oxalato_calcico_sed
     - fibra_mucoide_sed
     - creatinina_orina
-    - albumina_orina
+    - albumina_orina_num
     - indice_albumina_creatinina
     - albumina_porcentaje
     - alfa1_globulina
@@ -234,7 +234,6 @@ Tratamiento_Variables:
     - pgh_compañia_b
     - pgh_compañia_c
     - pgh_compañia_d
-    - pgh_compañia_e
     - ffq_panblanco
     - ffq_paninteg
     - ffq_cerealdes
@@ -597,6 +596,7 @@ Tratamiento_Variables:
     - PAS_media
     - PAD_media
     - xb
+    - pgh_compañia_e
   Especial:
     - f_nac
     - med1
