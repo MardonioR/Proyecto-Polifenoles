@@ -3,79 +3,7 @@ import numpy as np
 
 import statsmodels.formula.api as smf
 from statsmodels.stats.multitest import multipletests
-
-
-# ---------------------------------------------------------
-# PREPARACIÓN DEL DATAFRAME PARA MODELO LMM
-# ---------------------------------------------------------
-# Función para inferir tipo de variable
-def inferir_tipo(s: pd.Series, max_cat_unique=10):
-    """
-    Infiere el tipo de variable. Basado en tipo de dato y máximo de valores diferentes para no ser categórica.
-
-    Devuelve:
-        - vacia
-        - numerica
-        - categorica 
-    """
-    s_nonmissing = s.dropna()
-    if s_nonmissing.empty:
-        return "vacia"
-    
-    if pd.api.types.is_numeric_dtype(s_nonmissing):
-        nunique = s_nonmissing.nunique()
-        if nunique > max_cat_unique:
-            return "numerica"
-        # numerica pero bajo numero de valores diferentes -> podría ser binaria u ordinal
-        return "categorica"
-    
-    # no numerica -> categorica
-    return "categorica"
-
-# Definiendo una función para preparación del DataFrame
-def prepare_dataframe(
-        df,
-        id_col="id",
-        group_col="grupo",
-        treatment_col="Treatment",
-        time_col="Time",
-        exclude_cols=None):
-    """
-    - Asegura tipos categóricos y orden (Pre->Post).
-    - Selecciona solo columnas numéricas (excepto columnas clave/excluidas).
-    """
-    df = df.copy()
-
-    if exclude_cols is None:
-        exclude_cols = []
-
-    key_cols = {id_col, group_col, treatment_col, time_col}
-    exclude = set(exclude_cols) | key_cols
-
-    # Tipos categóricos
-    df[id_col] = df[id_col].astype("category")
-
-    # Group como categórico
-    df[group_col] = df[group_col].astype("category")
-
-    # Orden explícito para Time: Pre < Post
-    df[time_col] = pd.Categorical(df[time_col], categories=["Pre", "Post"], ordered=True)
-
-    # Orden explícito para Treatment: Control como referencia
-    df[treatment_col] = pd.Categorical(df[treatment_col],
-                                       categories=["Control", "Intervencion"],
-                                       ordered=True)
-
-    # Selección de columnas numéricas
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    # Quitar numéricas que sean clave o excluidas (p.ej. si Group está como int)
-    numeric_cols = [
-        c for c in numeric_cols 
-        if c not in exclude 
-        and f.inferir_tipo(s=df[c], max_cat_unique=10) == "numerica"
-    ]
-
-    return df, numeric_cols
+from src import functions as f
 
 # ---------------------------------------------------------
 # AJUSTE DE MODELO LMM
@@ -155,7 +83,7 @@ def run_lmm_screen(
         exclude_cols=None,
         min_nonmissing=5):
     
-    df_prep, numeric_cols = prepare_dataframe(df, id_col, group_col, treatment_col, time_col, exclude_cols)
+    df_prep, numeric_cols = f.prepare_dataframe(df, id_col, group_col, treatment_col, time_col, exclude_cols)
 
     rows = []
     failed = []

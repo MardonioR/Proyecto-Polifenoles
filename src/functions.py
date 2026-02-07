@@ -74,7 +74,7 @@ def prepare_dataframe(
     numeric_cols = [
         c for c in numeric_cols 
         if c not in exclude 
-        and f.inferir_tipo(s=df[c], max_cat_unique=10) == "numerica"
+        and inferir_tipo(s=df[c], max_cat_unique=10) == "numerica"
     ]
 
     return df, numeric_cols
@@ -82,76 +82,6 @@ def prepare_dataframe(
     # ---------------------------------------------------------
     # INTERPRETADOR DE HALLAZGOS
     # ---------------------------------------------------------
-
-def interpretar_hallazgos(df, p_col="Triple_pvalue", did_p_col="DiD_pvalue", alpha=0.05):
-    """
-    Agrega columnas de interpretación verbal calculando el efecto neto para cada grupo.
-    """
-    df_out = df.copy()
-    
-    # CÁLCULO PREVIO DE EFECTOS NETOS
-    # Efecto estimado para el Grupo 1 (Referencia) es directo del Beta DiD
-    df_out['Est_Efecto_G1'] = df_out['DiD_beta(Treat×Time)']
-    
-    # Efecto estimado para el Grupo 2 es la SUMA (Base + Diferencial)
-    df_out['Est_Efecto_G2'] = df_out['DiD_beta(Treat×Time)'] + df_out['Triple_beta(Group×Treat×Time)']
-    
-    # LÓGICA DE INTERPRETACIÓN VERBAL
-    def generar_texto(row):
-        # Variables auxiliares para limpieza del código
-        eff_g1 = row['Est_Efecto_G1']
-        eff_g2 = row['Est_Efecto_G2']
-        diff_beta = row['Triple_beta(Group×Treat×Time)']
-        
-        # --- A. Analizar Triple Interacción (Prioridad Máxima) ---
-        if row[p_col] < alpha:
-            # Determinar la naturaleza de la diferencia
-            tipo_cambio = ""
-            
-            # Caso 1: Signos opuestos (Interacción cualitativa / Inversa)
-            if (eff_g1 * eff_g2) < 0:
-                tipo_cambio = "INVERSA (Los grupos van en direcciones opuestas)"
-            
-            # Caso 2: Mismo signo, pero G2 es más fuerte (mayor valor absoluto)
-            elif abs(eff_g2) > abs(eff_g1):
-                tipo_cambio = "INTENSIFICADA (Grupo 2 responde más fuerte)"
-                
-            # Caso 3: Mismo signo, pero G2 es más débil
-            else:
-                tipo_cambio = "ATENUADA (Grupo 2 responde menos)"
-
-            dir_g1 = "AUMENTA" if eff_g1 > 0 else "DISMINUYE"
-            dir_g2 = "AUMENTA" if eff_g2 > 0 else "DISMINUYE"
-
-            return (f"INTERACCIÓN {tipo_cambio}: "
-                    f"El Grupo 1 {dir_g1} ({eff_g1:.2f}), mientras que "
-                    f"el Grupo 2 {dir_g2} ({eff_g2:.2f}). "
-                    f"(Diferencial: {diff_beta:.2f})")
-        
-        # --- B. Analizar Efecto General (DiD) ---
-        elif row[did_p_col] < alpha:
-            direction = "AUMENTA" if eff_g1 > 0 else "DISMINUYE"
-            return (f"EFECTO GENERAL (Ambos Grupos): El tratamiento {direction} "
-                    f"la variable aprox {eff_g1:.2f}. "
-                    f"No hay diferencia significativa entre grupos.")
-            
-        # --- C. Sin hallazgos ---
-        else:
-            return "Neutro: No se detectan cambios significativos atribuibles al tratamiento."
-
-    # Aplicar la función
-    df_out["Interpretacion_Clinica"] = df_out.apply(generar_texto, axis=1)
-    
-    # Ordenando por prioridad
-    conditions = [
-        (df_out[p_col] < alpha),      # Prioridad 1: Interacción compleja
-        (df_out[did_p_col] < alpha)   # Prioridad 2: Efecto simple
-    ]
-    choices = [1, 2]
-    df_out["Prioridad"] = np.select(conditions, choices, default=3)
-    
-    return df_out.sort_values("Prioridad")
-
 def interpretar_hallazgos_final(df, 
                                 p_triple="Triple_q_FDR", 
                                 p_did="DiD_q_FDR", 
