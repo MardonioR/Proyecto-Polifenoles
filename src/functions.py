@@ -1,9 +1,10 @@
-# ----------------------------
-# FUNCIONES DE AYUDA
-# ----------------------------
 
 import pandas as pd
 import numpy as np
+
+# ----------------------------
+# FUNCIONES DE AYUDA
+# ----------------------------
 
 # Función para inferir tipo de variable
 def inferir_tipo(s: pd.Series, max_cat_unique=10):
