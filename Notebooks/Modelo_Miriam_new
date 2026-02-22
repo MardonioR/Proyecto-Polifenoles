@@ -1,1 +1,22 @@
-r.train_and_evaluate_random_forest(X, y, selected_features)
+import pandas as pd
+import yaml
+import numpy as np
+import sys
+from pathlib import Path
+from sklearn.metrics import mean_squared_error, r2_score
+from src import filtering_vars as fv
+from src import RFECV as fs
+from src import regressions as r
+
+# Librerias
+
+# Cargando Yaml
+with open("../config.yaml", "r", encoding="utf-8") as file:
+    config = yaml.safe_load(file)
+
+# Importando modulos
+
+
+parent_folder = str(Path.cwd().parent)
+if parent_folder not in sys.path:
+    sys.path.append(parent_folder)
