@@ -1,8 +1,22 @@
+import time
+import logging
 import pandas as pd
 import numpy as np
 import statsmodels.formula.api as smf
 from statsmodels.stats.multitest import multipletests
-import functions as f
+from src import functions as f
+
+# Librerias de modelos
+from sklearn.linear_model import Ridge, Lasso, ElasticNet
+from sklearn.svm import SVR
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.neural_network import MLPRegressor
+
+from sklearn.model_selection import RepeatedKFold, RandomizedSearchCV
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
+from sklearn.preprocessing import StandardScaler
 
 # ---------------------------------------------------------
 # AJUSTE DE MODELO LMM
@@ -164,3 +178,95 @@ def run_lmm_screen(
         results = results.sort_values(["Triple_qvalue_FDR", "Triple_pvalue"], ascending=True)
 
     return results, failed
+
+# ---------------------------------------------------------
+# MODELOS DEL CUARTO AVANCE
+# ---------------------------------------------------------
+def models_comparison_and_train(X_train, y_train, X_test, y_test, params_dict, n_splits = 7, n_repeats = 5):
+    # Registry de modelos
+    MODEL_REGISTRY = {
+        "Ridge": Ridge,
+        "Lasso": Lasso,
+        "ElasticNet": ElasticNet,
+        "SVR": SVR,
+        "KNeighborsRegressor": KNeighborsRegressor,
+        "DecisionTreeRegressor": DecisionTreeRegressor,
+        "MLPRegressor": MLPRegressor,
+    }
+
+    cv_strategy = RepeatedKFold(
+        n_splits= n_splits,
+        n_repeats= n_repeats,
+        random_state= 42
+    )
+
+    # Logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
+    results = []
+    best_estimators = {}
+
+    for name, model_config in params_dict.items():
+
+        start_time = time.time()
+        logger.info(f"Optimizando modelo: {name}")
+
+        # -------- Extraer configuración ----------
+        model_class_name = model_config['model']['class']
+        model_params = model_config['model']['params']
+        param_grid = model_config['param_grid']
+
+        model = MODEL_REGISTRY[model_class_name](**model_params)
+
+        # -------- Pipeline  ----------
+        pipeline = Pipeline(
+            steps=[
+                ('scaler', StandardScaler()),
+                ('model', model)
+            ],
+            memory=None 
+        )
+
+        # -------- RandomizedSearch ----------
+        search = RandomizedSearchCV(
+            estimator=pipeline,
+            param_distributions=param_grid,
+            n_iter=min(40, np.prod([len(v) for v in param_grid.values()])),
+            cv=cv_strategy,
+            scoring='neg_root_mean_squared_error',
+            n_jobs=-1,
+            random_state=42,
+            verbose=0
+        )
+
+        search.fit(X_train, y_train)
+
+        best_pipeline = search.best_estimator_
+        best_estimators[name] = best_pipeline
+
+        # -------- Evaluación en test ----------
+        y_pred = best_pipeline.predict(X_test)
+
+        rmse = root_mean_squared_error(y_test, y_pred)
+        mae = mean_absolute_error(y_test, y_pred)
+        r2 = r2_score(y_test, y_pred)
+
+        clean_params = {
+            k.replace('model__', ''): v
+            for k, v in search.best_params_.items()
+        }
+
+        elapsed = time.time() - start_time
+
+        results.append({
+            'Modelo': name,
+            'RMSE': rmse,
+            'MAE': mae,
+            'R2': r2,
+            'Mejores Hiperparámetros': clean_params,
+            'Tiempo (s)': round(elapsed, 2)
+        })
+
+        logger.info(f"{name} terminado en {elapsed:.2f} segundos")
+    return results
