@@ -762,3 +762,79 @@ Filtrado_Variables:
     - grasa
     - leucocitos
     - cv_social_relationships_100
+
+# ---------------------
+# Modelos Avance 4
+# ---------------------
+models_and_params:
+  Ridge:
+    model:
+      class: Ridge
+      params: {}
+    param_grid:
+      model__alpha: [0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
+      model__solver: [svd, cholesky, lsqr, sag, saga]
+
+  Lasso:
+    model:
+      class: Lasso
+      params:
+        max_iter: 20000
+    param_grid:
+      model__alpha: [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0, 100.0]
+      model__selection: [cyclic, random]
+
+  ElasticNet:
+    model:
+      class: ElasticNet
+      params:
+        max_iter: 20000
+    param_grid:
+      model__alpha: [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]
+      model__l1_ratio: [0.1, 0.3, 0.5, 0.7, 0.9, 0.95, 0.99]
+
+  SVR:
+    model:
+      class: SVR
+      params: {}
+    param_grid:
+      model__kernel: [linear, poly, rbf, sigmoid]
+      model__C: [0.01, 0.1, 1, 10, 100, 500]
+      model__gamma: [scale, auto, 0.001, 0.01, 0.1]
+      model__epsilon: [0.001, 0.01, 0.1, 0.2, 0.5]
+
+  KNN Regressor:
+    model:
+      class: KNeighborsRegressor
+      params: {}
+    param_grid:
+      model__n_neighbors: [3, 5, 7, 9, 11, 15, 21]
+      model__weights: [uniform, distance]
+      model__p: [1, 2]
+
+  Decision Tree:
+    model:
+      class: DecisionTreeRegressor
+      params:
+        random_state: 42
+    param_grid:
+      model__max_depth: [null, 5, 10, 20, 50]
+      model__min_samples_split: [2, 5, 10, 20]
+      model__min_samples_leaf: [1, 2, 5, 10, 15]
+
+  MLP Regressor:
+    model:
+      class: MLPRegressor
+      params:
+        max_iter: 5000
+        random_state: 42
+    param_grid:
+      model__hidden_layer_sizes:
+        - [50]
+        - [100]
+        - [50, 50]
+        - [100, 50]
+        - [100, 100]
+      model__activation: [tanh, relu]
+      model__solver: [lbfgs, adam]
+      model__alpha: [0.0001, 0.001, 0.01, 0.1]
