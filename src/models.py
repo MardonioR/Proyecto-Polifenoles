@@ -12,8 +12,9 @@ from sklearn.svm import SVR
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.neural_network import MLPRegressor
+from sklearn.cross_decomposition import PLSRegression
 
-from sklearn.model_selection import RepeatedKFold, RandomizedSearchCV
+from sklearn.model_selection import RepeatedKFold, RandomizedSearchCV, LeaveOneOut, KFold, cross_val_predict
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
@@ -270,3 +271,109 @@ def models_comparison_and_train(X_train, y_train, X_test, y_test, params_dict, n
 
         logger.info(f"{name} terminado en {elapsed:.2f} segundos")
     return results
+
+def models_comparison_and_train_v2(X, y, params_dict):
+    """
+    Evalúa modelos usando Nested Leave-One-Out Cross-Validation para conjuntos de datos pequeños.
+    """
+    # Configuración de logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', datefmt='%H:%M:%S')
+    logger = logging.getLogger(__name__)
+
+    # Registry de modelos 
+    MODEL_REGISTRY = {
+        "Ridge": Ridge,
+        "Lasso": Lasso,
+        "ElasticNet": ElasticNet,
+        "SVR": SVR,
+        "KNeighborsRegressor": KNeighborsRegressor,
+        "DecisionTreeRegressor": DecisionTreeRegressor,
+        "MLPRegressor": MLPRegressor,
+        "PLSRegression": PLSRegression 
+    }
+
+    # Estrategias de Validación Cruzada
+    # Outer CV (Evaluación del rendimiento real): LOOCV deja 1 muestra fuera 42 veces
+    outer_cv = LeaveOneOut()
+    
+    # Inner CV (Optimización de hiperparámetros): KFold simple para los 41 datos restantes
+    inner_cv = KFold(n_splits=5, shuffle=True, random_state=42)
+
+    results = []
+    best_estimators = {}
+
+    for name, model_config in params_dict.items():
+        start_time = time.time()
+        logger.info(f"Iniciando Nested CV para: {name}")
+
+        # -------- Extraer configuración ----------
+        model_class_name = model_config['model']['class']
+        model_params = model_config['model']['params']
+        param_grid = model_config['param_grid']
+
+        model = MODEL_REGISTRY[model_class_name](**model_params)
+
+        # -------- Pipeline ----------
+        pipeline = Pipeline(
+            steps=[
+                ('scaler', StandardScaler()),
+                ('model', model)
+            ]
+        )
+
+        # -------- RandomizedSearch (Bucle Interno) ----------
+        search = RandomizedSearchCV(
+            estimator=pipeline,
+            param_distributions=param_grid,
+            n_iter=min(40, np.prod([len(v) for v in param_grid.values()])),
+            cv=inner_cv,
+            scoring='neg_root_mean_squared_error',
+            n_jobs=-1,
+            random_state=42,
+            verbose=0
+        )
+
+        # -------- Evaluación LOOCV (Bucle Externo) ----------
+        # cross_val_predict ejecuta el 'search' 42 veces. 
+        # Cada vez, optimiza hiperparámetros con 41 muestras y predice la muestra restante.
+        y_pred_cv = cross_val_predict(search, X, y, cv=outer_cv, n_jobs=-1)
+        
+        # Métricas de generalización (Test real)
+        cv_rmse = root_mean_squared_error(y, y_pred_cv)
+        cv_mae = mean_absolute_error(y, y_pred_cv)
+        cv_r2 = r2_score(y, y_pred_cv)
+
+        # -------- Ajuste Final y Brecha de Entrenamiento ----------
+        # Ajustamos el search sobre todo el dataset (las 42 muestras) para obtener
+        # el modelo final, sus hiperparámetros y su rendimiento en Train.
+        search.fit(X, y)
+        best_pipeline = search.best_estimator_
+        best_estimators[name] = best_pipeline
+
+        # Predicción sobre Train (los mismos datos completos) para ver la brecha
+        y_pred_train = best_pipeline.predict(X)
+        train_rmse = root_mean_squared_error(y, y_pred_train)
+        train_r2 = r2_score(y, y_pred_train)
+
+        clean_params = {
+            k.replace('model__', ''): v
+            for k, v in search.best_params_.items()
+        }
+
+        elapsed = time.time() - start_time
+
+        # Guardar resultados con la brecha explícita
+        results.append({
+            'Modelo': name,
+            'Train R2': train_r2,
+            'CV (Test) R2': cv_r2,
+            'Brecha R2': train_r2 - cv_r2,
+            'Train RMSE': train_rmse,
+            'CV RMSE': cv_rmse,
+            'Mejores Hiperparámetros': clean_params,
+            'Tiempo (s)': round(elapsed, 2)
+        })
+
+        logger.info(f"{name} finalizado. Train R2: {train_r2:.3f} | CV R2: {cv_r2:.3f} | Brecha R2: {train_r2 - cv_r2:.3f}")
+
+    return pd.DataFrame(results), best_estimators
