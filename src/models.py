@@ -2,6 +2,7 @@ import time
 import logging
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 import statsmodels.formula.api as smf
 from statsmodels.stats.multitest import multipletests
 from src import functions as f
@@ -13,8 +14,10 @@ from sklearn.neighbors import KNeighborsRegressor
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.cross_decomposition import PLSRegression
+from sklearn import set_config
+from sklearn.ensemble import VotingRegressor
 
-from sklearn.model_selection import RepeatedKFold, RandomizedSearchCV, LeaveOneOut, KFold, cross_val_predict
+from sklearn.model_selection import RepeatedKFold, RandomizedSearchCV, LeaveOneOut, KFold, cross_val_predict, permutation_test_score
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
@@ -276,6 +279,9 @@ def models_comparison_and_train_v2(X, y, params_dict):
     """
     Evalúa modelos usando Nested Leave-One-Out Cross-Validation para conjuntos de datos pequeños.
     """
+    # Obliga a imprimir todos los parámetros, incluso los que están por defecto
+    set_config(print_changed_only=False)
+
     # Configuración de logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', datefmt='%H:%M:%S')
     logger = logging.getLogger(__name__)
@@ -288,7 +294,6 @@ def models_comparison_and_train_v2(X, y, params_dict):
         "SVR": SVR,
         "KNeighborsRegressor": KNeighborsRegressor,
         "DecisionTreeRegressor": DecisionTreeRegressor,
-        "MLPRegressor": MLPRegressor,
         "PLSRegression": PLSRegression 
     }
 
@@ -377,3 +382,122 @@ def models_comparison_and_train_v2(X, y, params_dict):
         logger.info(f"{name} finalizado. Train R2: {train_r2:.3f} | CV R2: {cv_r2:.3f} | Brecha R2: {train_r2 - cv_r2:.3f}")
 
     return pd.DataFrame(results), best_estimators
+
+# Y - Randomization test
+def run_y_randomization_test(best_estimators, X, y, n_permutations=100):
+    """
+    Ejecuta la prueba de Y-Randomization para comprobar la validez estadística de los modelos.
+    
+    Parámetros:
+    - best_estimators: Diccionario con los hiperparametros ya optimizados.
+    - X, y: Datasets completo.
+    - n_permutations: Número de veces que se desordenará 'y'.
+    """
+    # Configuración de logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+    logger = logging.getLogger(__name__)
+
+    # Usamos KFold de 8 para la prueba para no hacerla eternamente lenta
+    cv_strategy = KFold(n_splits=8, shuffle=True, random_state=42)
+    
+    resultados_permutacion = {}
+
+    # Configurar la gráfica para visualizar los 4 modelos
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    axes = axes.ravel()
+
+    for idx, (nombre, pipeline) in enumerate(best_estimators.items()):
+        logger.info(f"Iniciando Y-Randomization para: {nombre} ({n_permutations} permutaciones)...")
+        
+        # Ejecución del Permutation Test
+        score_real, permuted_scores, pvalue = permutation_test_score(
+            estimator=pipeline,
+            X=X,
+            y=y,
+            scoring='r2',
+            cv=cv_strategy,
+            n_permutations=n_permutations,
+            n_jobs=-1,
+            random_state=42
+        )
+        
+        resultados_permutacion[nombre] = {
+            'R2 Real': score_real,
+            'R2 Promedio Ruido': np.mean(permuted_scores),
+            'p-value': pvalue
+        }
+        
+        # --- Visualización del test ---
+        ax = axes[idx]
+        ax.hist(permuted_scores, bins=20, density=True, alpha=0.7, color='gray', label='Scores Aleatorios (Ruido)')
+        ax.axvline(score_real, color='red', linestyle='dashed', linewidth=2, label=f'R2 Real ({score_real:.2f})')
+        ax.axvline(np.mean(permuted_scores), color='black', linestyle='solid', linewidth=1, label='Media Ruido')
+        
+        ax.set_title(f"{nombre} | p-value: {pvalue:.4f}")
+        ax.set_xlabel("R2 Score")
+        ax.set_ylabel("Frecuencia")
+        ax.legend()
+        
+        logger.info(f"{nombre} -> R2 Real: {score_real:.3f} | R2 Ruido: {np.mean(permuted_scores):.3f} | p-value: {pvalue:.4f}")
+
+    plt.tight_layout()
+    plt.show()
+    
+    return resultados_permutacion
+
+def build_and_evaluate_ensemble(best_estimators, X, y):
+    """
+    Construye un VotingRegressor a partir de los mejores modelos optimizados
+    y lo evalúa utilizando Leave-One-Out Cross-Validation.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("Construyendo el ensamble unificado...")
+    
+    # Extraer solo los modelos optimizados (ignorando los scalers individuales)
+    modelos_aprobados = ['Ridge', 'Lasso', 'ElasticNet', 'SVR']
+    estimadores_ensamble = []
+    
+    for nombre, pipeline in best_estimators.items():
+        if nombre in modelos_aprobados:
+            # Extraemos el modelo con los hiperparámetros que el RandomizedSearchCV ya encontró
+            modelo_optimizado = pipeline.named_steps['model']
+            estimadores_ensamble.append((nombre, modelo_optimizado))
+            
+    # Crear el VotingRegressor con los modelos base
+    ensamble_voting = VotingRegressor(estimators=estimadores_ensamble)
+    
+    # Crear el Pipeline maestro (Escalado único -> Ensamble)
+    pipeline_final = Pipeline(
+        steps=[
+            ('scaler', StandardScaler()),
+            ('ensamble', ensamble_voting)
+        ]
+    )
+    
+    # Evaluación rigurosa (LOOCV) para N=42
+    logger.info("Evaluando el ensamble con LOOCV...")
+    loo = LeaveOneOut()
+    
+    # cross_val_predict ajustará el pipeline 42 veces dejando un paciente fuera a la vez
+    y_pred_cv = cross_val_predict(pipeline_final, X, y, cv=loo, n_jobs=-1)
+    
+    # Métricas de generalización
+    cv_r2 = r2_score(y, y_pred_cv)
+    cv_rmse = root_mean_squared_error(y, y_pred_cv)
+    
+    # Ajuste final con todos los datos para medir la brecha
+    pipeline_final.fit(X, y)
+    y_pred_train = pipeline_final.predict(X)
+    train_r2 = r2_score(y, y_pred_train)
+    
+    # Imprimir reporte
+    print("\n" + "="*50)
+    print("RESULTADOS DEL MODELO FINAL ENSAMBLADO")
+    print("="*50)
+    print(f"R2 Entrenamiento (Train):      {train_r2:.4f}")
+    print(f"R2 Validación (LOOCV Test):    {cv_r2:.4f}")
+    print(f"Brecha de R2 (Train - Test):   {train_r2 - cv_r2:.4f}")
+    print(f"RMSE de Validación:            {cv_rmse:.4f}")
+    print("="*50)
+    
+    return pipeline_final
