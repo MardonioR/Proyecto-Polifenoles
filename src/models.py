@@ -22,6 +22,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
 
+import shap
+
 # ---------------------------------------------------------
 # AJUSTE DE MODELO LMM
 # ---------------------------------------------------------
@@ -275,6 +277,9 @@ def models_comparison_and_train(X_train, y_train, X_test, y_test, params_dict, n
         logger.info(f"{name} terminado en {elapsed:.2f} segundos")
     return results
 
+# ---------------------------------------------------------
+# FUNCIONES PARA ENTREGA DE MODELO FINAL (abajo)
+# ---------------------------------------------------------
 def models_comparison_and_train_v2(X, y, params_dict):
     """
     Evalúa modelos usando Nested Leave-One-Out Cross-Validation para conjuntos de datos pequeños.
@@ -501,3 +506,119 @@ def build_and_evaluate_ensemble(best_estimators, X, y):
     print("="*50)
     
     return pipeline_final
+
+def interpretar_ensamble_shap(pipeline_final, X, feature_names, n_vars):
+    """
+    Calcula Valores SHAP para un pipeline ensamblado, grafica la importancia 
+    y genera una interpretación automatizada en texto.
+    
+    Parámetros:
+    - pipeline_final: Tu modelo final entrenado (Pipeline con StandardScaler + VotingRegressor).
+    - X: DataFrame o array bidimensional con los datos ORIGINALES (sin escalar). N=42.
+    - feature_names: Lista con los nombres de los polifenoles/biomarcadores.
+    - n_vars: Número de variables a interpretar (top n).
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("Calculando valores SHAP (KernelExplainer)... esto puede tomar un momento.")
+    
+    # 1. Asegurar que X es un DataFrame para mantener los nombres y unidades originales
+    if not isinstance(X, pd.DataFrame):
+        X_df = pd.DataFrame(X, columns=feature_names)
+    else:
+        X_df = X.copy()
+        
+    # 2. Configurar el KernelExplainer
+    # Pasamos el predict del pipeline completo. El pipeline se encargará de escalar internamente.
+    # Usamos X_df como background. Como N=42 es pequeño, podemos usar el dataset completo.
+    predict_wrapper = lambda x_array: pipeline_final.predict(pd.DataFrame(x_array, columns=feature_names))
+    explainer = shap.KernelExplainer(predict_wrapper, X_df)
+    
+    # Calcular los valores SHAP para todos los individuos
+    shap_values = explainer.shap_values(X_df)
+    
+    # 3. Gráfico 1: Importancia Global de Variables (Bar Plot)
+    plt.figure(figsize=(10, 6))
+    plt.title("Importancia Global de Biomarcadores (Magnitud Media SHAP)", fontsize=14)
+    shap.summary_plot(shap_values, X_df, plot_type="bar", show=False)
+    plt.tight_layout()
+    plt.show()
+    
+    
+    # 4. Gráfico 2: Impacto Direccional (Beeswarm Plot con unidades originales)
+    plt.figure(figsize=(10, 6))
+    plt.title("Impacto Direccional en la Respuesta Cognitiva (SHAP Values)", fontsize=14)
+    shap.summary_plot(shap_values, X_df, show=False)
+    plt.tight_layout()
+    plt.show()
+    
+    # 5. Gráfico 3: Gráfico de Dependencia Parcial (SHAP Dependence Plot) para la variable Top 1
+    # Calculamos cuál es la variable más importante (la de mayor magnitud media absoluta)
+    importancia_global = np.abs(shap_values).mean(axis=0)
+    top_1_idx = np.argmax(importancia_global)
+    top_1_name = X_df.columns[top_1_idx]
+    
+    logger.info(f"Generando Dependence Plot para la variable principal: {top_1_name}")
+    
+    plt.figure(figsize=(8, 6))
+    plt.title(f"Efecto No Lineal y Umbrales: {top_1_name}", fontsize=14)
+    # shap.dependence_plot grafica el valor de la variable vs su impacto SHAP
+    # Automáticamente colorea los puntos con la variable con la que más interactúa
+    shap.dependence_plot(
+        top_1_idx, 
+        shap_values, 
+        X_df, 
+        feature_names=feature_names, 
+        show=False,
+        interaction_index="auto" # Encuentra la variable que más interactúa con la Top 1
+    )
+    plt.tight_layout()
+    plt.show()
+    
+    # 6. Generación de Interpretación Escrita Automatizada
+    generar_texto_interpretativo(shap_values, X_df, n_vars)
+    
+    return explainer, shap_values
+
+def generar_texto_interpretativo(shap_values, X_df, top_n=5):
+    """
+    Analiza la matriz SHAP y genera un párrafo descriptivo sobre las variables más importantes.
+    """
+    # Calcular la importancia media absoluta para ordenar las variables
+    importancia_global = np.abs(shap_values).mean(axis=0)
+    indices_top = np.argsort(importancia_global)[::-1][:top_n]
+    
+    columnas_top = X_df.columns[indices_top]
+    
+    print("\n" + "="*60)
+    print(" INTERPRETACIÓN PARA EL REPORTE ")
+    print("="*60)
+    print("### Análisis de Importancia de Variables (SHAP)\n")
+    print("El modelo de ensamble unificado fue sometido a una interpretación "
+          "mediante Valores de Shapley (SHAP) para cuantificar el impacto individual "
+          "de cada variable en la respuesta cognitiva. \nAl evaluar el pipeline "
+          "completo, las interpretaciones conservan la escala original de las mediciones.\n")
+    
+    print(f"Las {top_n} variables con mayor poder predictivo en el modelo son:")
+    
+    for i, col in enumerate(columnas_top):
+        idx_col = X_df.columns.get_loc(col)
+        vals_shap = shap_values[:, idx_col]
+        vals_orig = X_df[col].values
+        
+        # Determinar la dirección de la correlación evaluando dónde los valores altos 
+        # de la variable original producen valores SHAP positivos o negativos.
+        # Usamos la correlación de Pearson entre la característica y su valor SHAP.
+        correlacion = np.corrcoef(vals_orig, vals_shap)[0, 1]
+        
+        impacto_str = "positivo" if correlacion > 0 else "negativo"
+        magnitud = importancia_global[idx_col]
+        
+        print(f"{i+1}. **{col}**: Demuestra un impacto {impacto_str} en la variable objetivo. "
+              f"(Magnitud media de impacto predictivo: {magnitud:.4f}). "
+              f"Esto sugiere que niveles más elevados de este biomarcador/variable tienden a "
+              f"{'incrementar' if correlacion > 0 else 'disminuir'} el indicador cognitivo evaluado (delta bdnf).")
+        
+    print("\n*Nota metodológica: El gráfico Beeswarm adjunto permite observar la distribución "
+          "no lineal de estos impactos, donde el eje horizontal representa la modificación en "
+          "la predicción respecto al valor base esperado.*")
+    print("="*60)
