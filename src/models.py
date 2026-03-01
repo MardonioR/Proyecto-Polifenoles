@@ -553,26 +553,26 @@ def interpretar_ensamble_shap(pipeline_final, X, feature_names, n_vars):
     
     # 5. Gráfico 3: Gráfico de Dependencia Parcial (SHAP Dependence Plot) para la variable Top 1
     # Calculamos cuál es la variable más importante (la de mayor magnitud media absoluta)
-    importancia_global = np.abs(shap_values).mean(axis=0)
-    top_1_idx = np.argmax(importancia_global)
-    top_1_name = X_df.columns[top_1_idx]
+    # importancia_global = np.abs(shap_values).mean(axis=0)
+    # top_1_idx = np.argmax(importancia_global)
+    # top_1_name = X_df.columns[top_1_idx]
     
-    logger.info(f"Generando Dependence Plot para la variable principal: {top_1_name}")
+    # logger.info(f"Generando Dependence Plot para la variable principal: {top_1_name}")
     
-    plt.figure(figsize=(8, 6))
-    plt.title(f"Efecto No Lineal y Umbrales: {top_1_name}", fontsize=14)
+    # plt.figure(figsize=(8, 6))
+    # plt.title(f"Efecto No Lineal y Umbrales: {top_1_name}", fontsize=14)
     # shap.dependence_plot grafica el valor de la variable vs su impacto SHAP
     # Automáticamente colorea los puntos con la variable con la que más interactúa
-    shap.dependence_plot(
-        top_1_idx, 
-        shap_values, 
-        X_df, 
-        feature_names=feature_names, 
-        show=False,
-        interaction_index="auto" # Encuentra la variable que más interactúa con la Top 1
-    )
-    plt.tight_layout()
-    plt.show()
+    # shap.dependence_plot(
+    #     top_1_idx, 
+    #     shap_values, 
+    #     X_df, 
+    #     feature_names=feature_names, 
+    #     show=False,
+    #     interaction_index="auto" # Encuentra la variable que más interactúa con la Top 1
+    # )
+    # plt.tight_layout()
+    # plt.show()
     
     # 6. Generación de Interpretación Escrita Automatizada
     generar_texto_interpretativo(shap_values, X_df, n_vars)
